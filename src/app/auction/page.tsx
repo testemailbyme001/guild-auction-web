@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Image, { StaticImageData } from "next/image";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
@@ -38,6 +38,17 @@ type AuctionItem = {
   page: number;
   order: number;
   user: string;
+};
+
+type GroupedAuctionItem = {
+  id: string;
+  key: AuctionItemKey;
+  name: string;
+  image: StaticImageData;
+  date: string;
+  page: number;
+  user: string;
+  orderText: string;
 };
 
 type AuctionConfigItem = {
@@ -126,6 +137,53 @@ const defaultFormValues: AuctionFormValues = {
 const getTodayText = () => {
   return new Intl.DateTimeFormat("en-GB").format(new Date());
 };
+const getOrderText = (orders: number[]) => {
+  if (orders.length === 0) {
+    return "";
+  }
+
+  const sortedOrders = [...orders].sort((a, b) => a - b);
+  const firstOrder = sortedOrders[0];
+  const lastOrder = sortedOrders[sortedOrders.length - 1];
+
+  if (firstOrder === lastOrder) {
+    return String(firstOrder);
+  }
+
+  return `${firstOrder}-${lastOrder}`;
+};
+
+const groupAuctionRows = (rows: AuctionItem[]): GroupedAuctionItem[] => {
+  const groups = new Map<string, GroupedAuctionItem & { orders: number[] }>();
+
+  rows.forEach((row) => {
+    const groupKey = [row.date, row.key, row.name, row.user, row.page].join(
+      "|",
+    );
+
+    const currentGroup = groups.get(groupKey);
+
+    if (currentGroup) {
+      currentGroup.orders.push(row.order);
+      currentGroup.orderText = getOrderText(currentGroup.orders);
+      return;
+    }
+
+    groups.set(groupKey, {
+      id: groupKey,
+      key: row.key,
+      name: row.name,
+      image: row.image,
+      date: row.date,
+      page: row.page,
+      user: row.user,
+      orders: [row.order],
+      orderText: String(row.order),
+    });
+  });
+
+  return Array.from(groups.values()).map(({ orders, ...group }) => group);
+};
 
 const getAuctionRowClassName = (key: AuctionItemKey) => {
   switch (key) {
@@ -146,6 +204,49 @@ const getAuctionRowClassName = (key: AuctionItemKey) => {
   }
 };
 
+const getCaptureItemTheme = (key: AuctionItemKey) => {
+  switch (key) {
+    case "puppetFragmentOptAlbum":
+      return {
+        background: "#faf5ff", // purple-50
+        border: "#e9d5ff", // purple-200
+      };
+
+    case "illusionCardFragment":
+      return {
+        background: "#fefce8", // yellow-50
+        border: "#fef08a", // yellow-200
+      };
+
+    case "lightDarkOptChest":
+      return {
+        background: "#fdf2f8", // pink-50
+        border: "#fbcfe8", // pink-200
+      };
+
+    case "timeSpaceOptChest":
+      return {
+        background: "#eff6ff", // blue-50
+        border: "#bfdbfe", // blue-200
+      };
+
+    default:
+      return {
+        background: "#ffffff",
+        border: "#e5e7eb",
+      };
+  }
+};
+
+const escapeHtml = (value: string) => {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+};
+
 export default function Auction() {
   const [isOpenCreateModal, setIsOpenCreateModal] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -163,6 +264,10 @@ export default function Auction() {
     control,
     name: "winnerTexts",
   });
+
+  const groupedAuctionData = useMemo(() => {
+    return groupAuctionRows(auctionData);
+  }, [auctionData]);
 
   const splitNamesByRow = (text: string) => {
     return text
@@ -247,6 +352,203 @@ export default function Auction() {
       setIsCapturing(false);
     }
   };
+
+  const handleCaptureAuctionItem = async (auctionItem: AuctionConfigItem) => {
+    if (isCapturing) {
+      return;
+    }
+
+    const itemRows = auctionData.filter((row) => row.key === auctionItem.key);
+    const groupedRows = groupAuctionRows(itemRows);
+
+    if (groupedRows.length === 0) {
+      toast.danger("No data", {
+        description: `ยังไม่มีข้อมูลของ ${auctionItem.name}`,
+        timeout: 3000,
+      });
+
+      return;
+    }
+
+    try {
+      setIsCapturing(true);
+
+      const html2canvas = (await import("html2canvas-pro")).default;
+      const theme = getCaptureItemTheme(auctionItem.key);
+      const currentFont = getComputedStyle(document.body).fontFamily;
+
+      await document.fonts.ready;
+
+      const captureElement = document.createElement("div");
+
+      captureElement.style.position = "fixed";
+      captureElement.style.left = "-9999px";
+      captureElement.style.top = "0";
+      captureElement.style.width = "1100px";
+      captureElement.style.background = "#f9fafb";
+      captureElement.style.padding = "24px";
+      captureElement.style.fontFamily = currentFont;
+
+      captureElement.innerHTML = `
+      <div style="
+        background: white;
+        border-radius: 20px;
+        overflow: hidden;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+        font-family: ${currentFont};
+      ">
+        <div style="
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 20px 24px;
+          border-bottom: 1px solid #e5e7eb;
+          background: #ffffff;
+          font-family: ${currentFont};
+        ">
+          <img
+            src="${auctionItem.image.src}"
+            alt="${escapeHtml(auctionItem.name)}"
+            style="
+              width: 64px;
+              height: 64px;
+              object-fit: contain;
+              border-radius: 12px;
+            "
+          />
+
+          <div>
+            <div style="
+              font-size: 22px;
+              font-weight: 700;
+              color: #111827;
+              font-family: ${currentFont};
+            ">
+              ${escapeHtml(auctionItem.name)}
+            </div>
+
+            <div style="
+              margin-top: 4px;
+              font-size: 14px;
+              color: #6b7280;
+              font-family: ${currentFont};
+            ">
+              Guild Auction Capture
+            </div>
+          </div>
+        </div>
+
+        <div>
+          ${groupedRows
+            .map(
+              (row) => `
+                <div style="
+                  display: grid;
+                  grid-template-columns: 160px 1fr 180px 150px 150px;
+                  align-items: center;
+                  gap: 16px;
+                  padding: 18px 24px;
+                  border-bottom: 1px solid ${theme.border};
+                  background: ${theme.background};
+                  color: #111827;
+                  font-size: 18px;
+                  font-family: ${currentFont};
+                ">
+                  <div style="font-weight: 500; font-family: ${currentFont};">
+                    ${escapeHtml(row.date)}
+                  </div>
+
+                  <div style="
+                    display: flex;
+                    align-items: center;
+                    gap: 14px;
+                    font-weight: 600;
+                    font-family: ${currentFont};
+                  ">
+                    <img
+                      src="${row.image.src}"
+                      alt="${escapeHtml(row.name)}"
+                      style="
+                        width: 56px;
+                        height: 56px;
+                        object-fit: contain;
+                        border-radius: 10px;
+                      "
+                    />
+
+                    <span>${escapeHtml(row.name)}</span>
+                  </div>
+
+                  <div style="
+                    text-align: center;
+                    font-weight: 600;
+                    font-family: ${currentFont};
+                  ">
+                    ${escapeHtml(row.user)}
+                  </div>
+
+                  <div style="text-align: center; font-family: ${currentFont};">
+                    หน้าที่ ${row.page}
+                  </div>
+
+                  <div style="text-align: center; font-family: ${currentFont};">
+                    ลำดับที่ ${escapeHtml(row.orderText)}
+                  </div>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </div>
+    `;
+
+      document.body.appendChild(captureElement);
+
+      const canvas = await html2canvas(captureElement, {
+        backgroundColor: "#f9fafb",
+        scale: 1.5,
+        useCORS: true,
+      });
+
+      document.body.removeChild(captureElement);
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error("Cannot create image blob"));
+            return;
+          }
+
+          resolve(blob);
+        }, "image/png");
+      });
+
+      if (!navigator.clipboard || !window.ClipboardItem) {
+        throw new Error("Clipboard image copy is not supported");
+      }
+
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "image/png": blob,
+        }),
+      ]);
+
+      toast.success("Capture copied", {
+        description: `คัดลอกรูป ${auctionItem.name} แล้ว`,
+        timeout: 3000,
+      });
+    } catch (error) {
+      toast.danger("Capture failed", {
+        description: `ไม่สามารถ capture ${auctionItem.name} ได้`,
+        timeout: 3000,
+      });
+
+      console.error("Capture item failed:", error);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
   const handleCreateAuction = (values: AuctionFormValues) => {
     const today = getTodayText();
     const generatedRows: AuctionItem[] = [];
@@ -300,20 +602,38 @@ export default function Auction() {
           <div className="flex w-full items-center justify-between">
             <h2 className="text-lg font-medium">Guild Auction</h2>
 
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                isDisabled={auctionData.length === 0 || isCapturing}
-                onPress={handleCapturePage}
-              >
-                {isCapturing ? "Capturing..." : "Capture"}
-              </Button>
+            <Button onPress={handleOpenCreateModal}>
+              <Plus width={20} height={20} />
+              Create
+            </Button>
+          </div>
 
-              <Button onPress={handleOpenCreateModal}>
-                <Plus width={20} height={20} />
-                Create
-              </Button>
-            </div>
+          <div className="flex w-full items-end justify-end gap-2">
+            {auctionItems.map((item) => {
+              const hasItemData = auctionData.some(
+                (row) => row.key === item.key,
+              );
+
+              return (
+                <Button
+                  key={item.key}
+                  variant="outline"
+                  isDisabled={!hasItemData || isCapturing}
+                  className="flex flex-wrap items-center gap-2 h-18 px-3 text-sm"
+                  onPress={() => handleCaptureAuctionItem(item)}
+                >
+                  <Image
+                    src={item.image}
+                    alt={item.name}
+                    width={64}
+                    height={64}
+                    className="rounded object-contain"
+                  />
+
+                  <span className="">Capture</span>
+                </Button>
+              );
+            })}
           </div>
 
           <Table>
@@ -348,13 +668,13 @@ export default function Auction() {
                     </div>
                   )}
                 >
-                  {auctionData.map((item) => {
+                  {groupedAuctionData.map((item) => {
                     const rowClassName = getAuctionRowClassName(item.key);
 
                     return (
                       <Table.Row
-                        id={`${item.page}-${item.order}`}
-                        key={`${item.page}-${item.order}`}
+                        id={`${item.page}-${item.orderText}`}
+                        key={`${item.page}-${item.orderText}`}
                         className={rowClassName}
                       >
                         <Table.Cell className={`text-center ${rowClassName}`}>
@@ -384,7 +704,7 @@ export default function Auction() {
                         </Table.Cell>
 
                         <Table.Cell className={`text-center ${rowClassName}`}>
-                          ลำดับที่ {item.order}
+                          ลำดับที่ {item.orderText}
                         </Table.Cell>
                       </Table.Row>
                     );
