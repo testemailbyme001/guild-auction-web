@@ -185,49 +185,49 @@ const groupAuctionRows = (rows: AuctionItem[]): GroupedAuctionItem[] => {
   return Array.from(groups.values()).map(({ orders, ...group }) => group);
 };
 
-const getAuctionRowClassName = (key: AuctionItemKey) => {
+const getAuctionRowClassName = (key: AuctionItemKey, shadeIndex = 0) => {
   switch (key) {
     case "puppetFragmentOptAlbum":
-      return "bg-purple-50";
+      return shadeIndex === 0 ? "bg-purple-50" : "bg-purple-100";
 
     case "illusionCardFragment":
-      return "bg-yellow-50";
+      return shadeIndex === 0 ? "bg-yellow-50" : "bg-yellow-100";
 
     case "lightDarkOptChest":
-      return "bg-pink-50";
+      return shadeIndex === 0 ? "bg-pink-50" : "bg-pink-100";
 
     case "timeSpaceOptChest":
-      return "bg-blue-50";
+      return shadeIndex === 0 ? "bg-blue-50" : "bg-blue-100";
 
     default:
       return "";
   }
 };
 
-const getCaptureItemTheme = (key: AuctionItemKey) => {
+const getCaptureItemTheme = (key: AuctionItemKey, shadeIndex = 0) => {
   switch (key) {
     case "puppetFragmentOptAlbum":
       return {
-        background: "#faf5ff", // purple-50
-        border: "#e9d5ff", // purple-200
+        background: shadeIndex === 0 ? "#faf5ff" : "#f3e8ff",
+        border: "#e9d5ff",
       };
 
     case "illusionCardFragment":
       return {
-        background: "#fefce8", // yellow-50
-        border: "#fef08a", // yellow-200
+        background: shadeIndex === 0 ? "#fefce8" : "#fef9c3",
+        border: "#fef08a",
       };
 
     case "lightDarkOptChest":
       return {
-        background: "#fdf2f8", // pink-50
-        border: "#fbcfe8", // pink-200
+        background: shadeIndex === 0 ? "#fdf2f8" : "#fce7f3",
+        border: "#fbcfe8",
       };
 
     case "timeSpaceOptChest":
       return {
-        background: "#eff6ff", // blue-50
-        border: "#bfdbfe", // blue-200
+        background: shadeIndex === 0 ? "#eff6ff" : "#dbeafe",
+        border: "#bfdbfe",
       };
 
     default:
@@ -236,6 +236,32 @@ const getCaptureItemTheme = (key: AuctionItemKey) => {
         border: "#e5e7eb",
       };
   }
+};
+
+const getMemberShadeKey = (key: AuctionItemKey, user: string) => {
+  return `${key}|${user}`;
+};
+
+const buildMemberShadeMap = (
+  rows: Array<Pick<GroupedAuctionItem, "key" | "user">>,
+) => {
+  const shadeMap = new Map<string, number>();
+  const memberCountByItem = new Map<AuctionItemKey, number>();
+
+  rows.forEach((row) => {
+    const shadeKey = getMemberShadeKey(row.key, row.user);
+
+    if (shadeMap.has(shadeKey)) {
+      return;
+    }
+
+    const currentCount = memberCountByItem.get(row.key) ?? 0;
+
+    shadeMap.set(shadeKey, currentCount % 2);
+    memberCountByItem.set(row.key, currentCount + 1);
+  });
+
+  return shadeMap;
 };
 
 const escapeHtml = (value: string) => {
@@ -268,6 +294,10 @@ export default function Auction() {
   const groupedAuctionData = useMemo(() => {
     return groupAuctionRows(auctionData);
   }, [auctionData]);
+
+  const memberShadeMap = useMemo(() => {
+    return buildMemberShadeMap(groupedAuctionData);
+  }, [groupedAuctionData]);
 
   const splitNamesByRow = (text: string) => {
     return text
@@ -303,56 +333,6 @@ export default function Auction() {
     setCreateAuctionStep(1);
   };
 
-  const handleCapturePage = async () => {
-    if (auctionData.length === 0 || isCapturing) {
-      return;
-    }
-
-    try {
-      setIsCapturing(true);
-
-      const html2canvas = (await import("html2canvas-pro")).default;
-
-      const html = document.documentElement;
-      const body = document.body;
-
-      const canvas = await html2canvas(body, {
-        backgroundColor: "#f9fafb",
-        scale: 2,
-        useCORS: true,
-        windowWidth: html.scrollWidth,
-        windowHeight: html.scrollHeight,
-        width: html.scrollWidth,
-        height: html.scrollHeight,
-        scrollX: -window.scrollX,
-        scrollY: -window.scrollY,
-      });
-
-      const imageUrl = canvas.toDataURL("image/png");
-
-      const link = document.createElement("a");
-      link.href = imageUrl;
-      link.download = `guild-auction-${new Date()
-        .toISOString()
-        .slice(0, 10)}.png`;
-
-      link.click();
-
-      toast.success("Capture success", {
-        description: "บันทึกรูป Guild Auction เรียบร้อยแล้ว",
-        timeout: 3000,
-      });
-    } catch (error) {
-      toast.danger("Capture failed", {
-        description: "ไม่สามารถ capture หน้าจอได้",
-        timeout: 3000,
-      });
-      console.error("Capture failed:", error);
-    } finally {
-      setIsCapturing(false);
-    }
-  };
-
   const handleCaptureAuctionItem = async (auctionItem: AuctionConfigItem) => {
     if (isCapturing) {
       return;
@@ -360,6 +340,7 @@ export default function Auction() {
 
     const itemRows = auctionData.filter((row) => row.key === auctionItem.key);
     const groupedRows = groupAuctionRows(itemRows);
+    const captureMemberShadeMap = buildMemberShadeMap(groupedRows);
 
     if (groupedRows.length === 0) {
       toast.danger("No data", {
@@ -441,63 +422,70 @@ export default function Auction() {
 
         <div>
           ${groupedRows
-            .map(
-              (row) => `
-                <div style="
-                  display: grid;
-                  grid-template-columns: 160px 1fr 180px 150px 150px;
-                  align-items: center;
-                  gap: 16px;
-                  padding: 18px 24px;
-                  border-bottom: 1px solid ${theme.border};
-                  background: ${theme.background};
-                  color: #111827;
-                  font-size: 18px;
-                  font-family: ${currentFont};
-                ">
-                  <div style="font-weight: 500; font-family: ${currentFont};">
-                    ${escapeHtml(row.date)}
-                  </div>
+            .map((row) => {
+              const shadeIndex =
+                captureMemberShadeMap.get(
+                  getMemberShadeKey(row.key, row.user),
+                ) ?? 0;
 
-                  <div style="
-                    display: flex;
-                    align-items: center;
-                    gap: 14px;
-                    font-weight: 600;
-                    font-family: ${currentFont};
-                  ">
-                    <img
-                      src="${row.image.src}"
-                      alt="${escapeHtml(row.name)}"
-                      style="
-                        width: 56px;
-                        height: 56px;
-                        object-fit: contain;
-                        border-radius: 10px;
-                      "
-                    />
+              const rowTheme = getCaptureItemTheme(row.key, shadeIndex);
 
-                    <span>${escapeHtml(row.name)}</span>
-                  </div>
+              return `
+      <div style="
+        display: grid;
+        grid-template-columns: 160px 1fr 180px 150px 150px;
+        align-items: center;
+        gap: 16px;
+        padding: 18px 24px;
+        border-bottom: 1px solid ${rowTheme.border};
+        background: ${rowTheme.background};
+        color: #111827;
+        font-size: 18px;
+        font-family: ${currentFont};
+      ">
+        <div style="font-weight: 500; font-family: ${currentFont};">
+          ${escapeHtml(row.date)}
+        </div>
 
-                  <div style="
-                    text-align: center;
-                    font-weight: 600;
-                    font-family: ${currentFont};
-                  ">
-                    ${escapeHtml(row.user)}
-                  </div>
+        <div style="
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          font-weight: 600;
+          font-family: ${currentFont};
+        ">
+          <img
+            src="${row.image.src}"
+            alt="${escapeHtml(row.name)}"
+            style="
+              width: 56px;
+              height: 56px;
+              object-fit: contain;
+              border-radius: 10px;
+            "
+          />
 
-                  <div style="text-align: center; font-family: ${currentFont};">
-                    หน้าที่ ${row.page}
-                  </div>
+          <span>${escapeHtml(row.name)}</span>
+        </div>
 
-                  <div style="text-align: center; font-family: ${currentFont};">
-                    ลำดับที่ ${escapeHtml(row.orderText)}
-                  </div>
-                </div>
-              `,
-            )
+        <div style="
+          text-align: center;
+          font-weight: 600;
+          font-family: ${currentFont};
+        ">
+          ${escapeHtml(row.user)}
+        </div>
+
+        <div style="text-align: center; font-family: ${currentFont};">
+          หน้าที่ ${row.page}
+        </div>
+
+        <div style="text-align: center; font-family: ${currentFont};">
+          ลำดับที่ ${escapeHtml(row.orderText)}
+        </div>
+      </div>
+    `;
+            })
             .join("")}
         </div>
       </div>
@@ -669,8 +657,15 @@ export default function Auction() {
                   )}
                 >
                   {groupedAuctionData.map((item) => {
-                    const rowClassName = getAuctionRowClassName(item.key);
+                    const shadeIndex =
+                      memberShadeMap.get(
+                        getMemberShadeKey(item.key, item.user),
+                      ) ?? 0;
 
+                    const rowClassName = getAuctionRowClassName(
+                      item.key,
+                      shadeIndex,
+                    );
                     return (
                       <Table.Row
                         id={`${item.page}-${item.orderText}`}
